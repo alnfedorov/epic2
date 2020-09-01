@@ -26,7 +26,7 @@ if sys.version_info[0] == 2:
 from sys import platform
 
 compile_options = [
-    "-Ofast", "-Wall"
+    "-Ofast", "-Wall", "-march=native"
 ]  #, "-frename-registers", "-funroll-loops"] # , "-lgzstream", "-lz"
 
 if platform == "linux" or platform == "linux2":
@@ -56,6 +56,7 @@ extensions = [
     Extension(
         "epic2.src.reads_to_bins",
         ["epic2/src/reads_to_bins.pyx", "epic2/src/gzstream.cpp"],
+        # ["epic2/src/reads_to_bins.pyx"],
         language="c++",
         include_dirs=conda_include + include_dirs,
         library_dirs=conda_lib,

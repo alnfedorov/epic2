@@ -161,9 +161,6 @@ genome_map read_bed(char const* fileName, uint32_t drop_duplicates)
 genome_map read_bedpe(char const* fileName, uint32_t drop_duplicates)
 {
   std::ifstream file(fileName);
-
-
-
   std::string   chromosome;
   std::string   junk;
   uint32_t start;
@@ -171,8 +168,6 @@ genome_map read_bedpe(char const* fileName, uint32_t drop_duplicates)
   uint32_t start2;
   uint32_t end2;
   char strand;
-
-
   key chrom_strand;
   interval _interval;
   // intvec tags;

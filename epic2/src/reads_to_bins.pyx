@@ -183,12 +183,10 @@ cdef class Vector32:
 cpdef files_to_bin_counts(files, args, datatype):
 
     cdef:
-        uint32_t bin_size = args["bin_size"]
         uint32_t half_fragment_size = args["fragment_size"] / 2
         uint32_t drop_duplicates = args["drop_duplicates"]
         Vector32 v
         Vector32 v2
-        long[::1] bin_arr
         bytes py_bytes
         char* c_string
         cr.genome_map cpp_tags
@@ -196,18 +194,11 @@ cpdef files_to_bin_counts(files, args, datatype):
         bool paired_end = False
         str file_format
 
-
-    sum_tags = defaultdict(list)
+    all_tags = list()
     logging.info("Parsing {} file(s):".format(datatype))
     sys.stderr.flush()
-    tags = dict()
-
-    # uint32_t mapq, uint64_t required_flag, uint64_t filter_flag
 
     for f in files:
-
-        paired_end = False
-
         logging.info("  " + f)
         sys.stderr.flush()
 
@@ -216,6 +207,7 @@ cpdef files_to_bin_counts(files, args, datatype):
 
         file_format = sniff(f)
 
+        paired_end = False
         if file_format == "bed":
             cpp_tags = cr.read_bed(c_string, drop_duplicates)
         elif file_format == "bedpe":
@@ -229,8 +221,9 @@ cpdef files_to_bin_counts(files, args, datatype):
             cpp_tags = cr.read_bedpe_gz(c_string, drop_duplicates)
             paired_end = True
 
-        it = cpp_tags.begin();
+        it = cpp_tags.begin()
 
+        tags = dict()
         while (it != cpp_tags.end()):
             chromosome = dereference(it).first.first.decode()
 
@@ -242,19 +235,16 @@ cpdef files_to_bin_counts(files, args, datatype):
 
             v = Vector32()
             v.wrapped_vector = dereference(it).second
+            v.sort() # needs to be done again, since extracting the 5' end might make tags wrong order
             tags[chromosome, strand] = v
 
             postincrement(it)
 
         if not paired_end:
             for (chromosome, strand), v in tags.items():
-
-                v.sort() # needs to be done again, since extracting the 5' end might make tags wrong order
-
                 if strand == "+":
                     for i in range(len(v)):
                         v.wrapped_vector[i] = v.wrapped_vector[i] + half_fragment_size
-                        v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
                 else:
                     i = 0
                     while i < len(v) and v.wrapped_vector[i] < half_fragment_size:
@@ -263,54 +253,40 @@ cpdef files_to_bin_counts(files, args, datatype):
 
                     for i in range(i, len(v)):
                         v.wrapped_vector[i] = v.wrapped_vector[i] - half_fragment_size
-                        v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
-
-                # for i in range(len(v)):
-                #     v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
-
-                # sys.stderr.write("Found {} for {} {}\n".format(i, chromosome, strand))
-                if chromosome not in sum_tags:
-                    sum_tags[chromosome] = v
-                else:
-                    v2 = sum_tags[chromosome]
-                    sum_tags[chromosome] = v.merge(v2)
+                all_tags.append((chromosome, v))
 
         else:
-
             for (chromosome, strand), v in tags.items():
-
-                v.sort() # needs to be done again, since extracting the 5' end might make tags wrong order
-
-                for i in range(len(v)):
-                    v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
-
-                if chromosome not in sum_tags:
-                    sum_tags[chromosome] = v
-                else:
-                    v2 = sum_tags[chromosome]
-                    sum_tags[chromosome] = v.merge(v2)
-
-
+                all_tags.append((chromosome, v))
     sys.stderr.flush()
+    return all_tags
+
+
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cpdef bin_counts(uint32_t bin_size, chromsizes, all_tags):
+    cdef:
+        Vector32 v
+        Vector32 v2
+
+    sum_tags = dict()
+
+    for chromosome, v in all_tags:
+        for i in range(len(v)):
+            v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
+
+        if chromosome not in sum_tags:
+            sum_tags[chromosome] = v
+        else:
+            v2 = sum_tags[chromosome]
+            sum_tags[chromosome] = v.merge(v2)
 
     bins_counts = count_reads_per_bin(sum_tags)
-    # print(bins_counts)
-
-    # import pandas as pd
-    # bins, counts = [pd.Series(s) for s in bins_counts["chrY"]]
-    # print(bins.tail(), file=sys.stderr)
-    # print(counts.tail(), file=sys.stderr)
-
     count = sum([sum(counts) for _, counts in bins_counts.values()])
-    remove_out_of_bounds_bins(bins_counts, args["chromsizes_"], bin_size)
-
-    # bins, counts = [pd.Series(s) for s in bins_counts["chrY"]]
-    # print(bins.tail())
-    # print(counts.tail())
-
-    # print(bins.tail(), file=sys.stderr)
-    # print(counts.tail(), file=sys.stderr)
-
+    remove_out_of_bounds_bins(bins_counts, chromsizes, bin_size)
     return bins_counts, count
 
 
@@ -340,47 +316,3 @@ cpdef add_reads_to_dict(f, chromosomes):
             genome[chromosome, strand] = v
 
     return genome
-
-
-
-######## this was actually slower!
-
-# cpdef add_reads_to_dict(f):
-
-#     genome = dict()
-#     cdef:
-#         Vector v
-#         FILE *f_handle
-#         char chromosome [10]
-#         char strand [2]
-#         uint32_t left
-#         uint32_t right
-
-#     fp = fopen(f.encode(), "r")
-
-#     while (
-#             fscanf(fp, "%s\t%d\t%d\t%*s\t%*d\t%s\n", chromosome, &left, &right, strand) != EOF
-#     ):
-
-
-#         # pruint32_t("----")
-#         # pruint32_t("chromosome is", chromosome)
-#         # pruint32_t("strand is", strand)
-#         # pruint32_t("left is", left)
-#         # pruint32_t("right is", right)
-#         if strand == b"+":
-#             five_end = left
-#         else:
-#             five_end = right
-
-#         # pruint32_t("five end is ", five_end)
-
-#         if (chromosome, strand) in genome:
-#             v = genome[chromosome, strand]
-#             v.wrapped_vector.push_back(five_end)
-#         else:
-#             v = Vector()
-#             v.wrapped_vector.push_back(five_end)
-#             genome[chromosome, strand] = v
-
-#     return genome

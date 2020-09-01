@@ -1,4 +1,3 @@
-
 from cython.operator import dereference, postincrement
 from libc.stdint cimport uint32_t, uint16_t, int32_t, int64_t, uint64_t
 

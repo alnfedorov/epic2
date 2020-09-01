@@ -1,6 +1,5 @@
-import sys
 import logging
-from math import pi, log, exp, ceil, fabs
+from math import pi, log, exp, ceil
 
 
 class Background_island_probscore_statistics:
@@ -20,42 +19,21 @@ class Background_island_probscore_statistics:
         self.average = self.tag_density * windowSize
         self.bin_size = bin_size
 
-        # Precalculate the poisson, cumulative poisson values up to max (500, 2*self.average) .
+        # Precalculate the poisson, cumulative poisson values up to max (500, 2*self.average).
         self.max_index = max(500, int(2 * self.average))
+
         #print self.average, self.max_index;
         #self.fact=[];
         self.poisson_value = []
         self.window_score = []
         self.window_scaled_score = []
-        for index in xrange(self.max_index):
-            # self.fact.append(self.factorial(index));
-            prob = self.poisson(index, self.average)
-            self.poisson_value.append(prob)
-            if (index < self.average):  # only want to look at enrichment
-                self.window_score.append(0)
-                self.window_scaled_score.append(0)
-            else:
-                if prob > 0:
-                    self.window_score.append(-log(prob))
-                    #scaled_score =int(-log(prob)/self.bin_size);
-                    scaled_score = int(round(-log(prob) / self.bin_size))
-                    self.window_scaled_score.append(scaled_score)
-                else:  #prob is too small and deemed 0 by the system
-                    self.window_score.append(1000)
-                    scaled_score = int(round(1000 / self.bin_size))
-                    self.window_scaled_score.append(scaled_score)
-            #print index, self.poisson_value[index], self.window_score[index];
-        self.max_index = len(self.poisson_value)
-        #print "max_index ", self.max_index;
+        self.precalculate_poisson(self.max_index)
+
         # gap_contribution needs min_tags_in_window
         # So the position of this line is critical.
         self.min_tags_in_window = 0
         sf = 1
 
-        # print("self.average=", self.average)
-        # print("self.poisson_value[0]=", self.poisson_value[0])
-        # print("window_pvalue", window_pvalue)
-        #print "self.poisson_value[0]=", self.poisson_value[0];
         while (sf > window_pvalue):
             #print self.min_tags_in_window, sf;
             # print("poisson", self.min_tags_in_window, self.poisson_value[self.min_tags_in_window])
@@ -92,8 +70,31 @@ class Background_island_probscore_statistics:
         self.island_expectation[
             0] = self.boundary_contribution * self.genome_length / self.gap_contribution
 
-        self.root = self.find_asymptotics_exponent()
+        # self.root = self.find_asymptotics_exponent()
         #print "Exponent for Asymptotics: ", self.root;
+
+    def precalculate_poisson(self, index):
+        assert len(self.window_score) == len(self.window_scaled_score) == len(self.poisson_value)
+        if len(self.poisson_value) > index:
+            return
+
+        for index in range(len(self.poisson_value), index + 1):
+            prob = self.poisson(index, self.average)
+            self.poisson_value.append(prob)
+            if index < self.average:  # only want to look at enrichment
+                self.window_score.append(0)
+                self.window_scaled_score.append(0)
+            else:
+                if prob > 0:
+                    self.window_score.append(-log(prob))
+                    scaled_score = int(round(-log(prob) / self.bin_size))
+                    self.window_scaled_score.append(scaled_score)
+                else:  #prob is too small and deemed 0 by the system
+                    self.window_score.append(1000)
+                    scaled_score = int(round(1000 / self.bin_size))
+                    self.window_scaled_score.append(scaled_score)
+
+        self.max_index = len(self.poisson_value)
 
     def factorial(self, m):
         value = 1.0
@@ -118,7 +119,7 @@ class Background_island_probscore_statistics:
 
     def poisson(self, i, average):
         if i < 20:
-            return exp(-average) * average**i / self.factorial(i)
+            return exp(-average) * average ** i / self.factorial(i)
         else:
             exponent = -average + i * log(average) - self.factln(i)
             return exp(exponent)
@@ -135,7 +136,7 @@ class Background_island_probscore_statistics:
 
     def single_gap_factor(self):
         my_gap_factor = 0
-        for i in xrange(self.min_tags_in_window):
+        for i in range(self.min_tags_in_window):
             my_gap_factor += self.poisson_value[i]
         return my_gap_factor
 
@@ -170,19 +171,19 @@ class Background_island_probscore_statistics:
             #index is the scaled_score
             for index in range(current_max_scaled_score + 1, scaled_score + 1):
                 temp = 0.0
-                #i is the number of tags in the added window
+                # i is the number of tags in the added window
                 i = self.min_tags_in_window
-                while (int(
-                        round(index - self.window_score[i] / self.bin_size)) >=
-                       0):
-                    #while ( (index - self.window_scaled_score[i])>=0):
-                    temp += self.poisson_value[i] * self.island_expectation[int(
-                        round(index - self.window_score[i] / self.bin_size))]
-                    #temp += self.poisson_value[i]* self.island_expectation[index - self.window_scaled_score[i]];
+                while int(round(index - self.window_score[i] / self.bin_size)) >= 0:
+                    if self.poisson_value[i] == 0:
+                        break
+                    temp += self.poisson_value[i] * \
+                            self.island_expectation[int(round(index - self.window_score[i] / self.bin_size))]
                     i += 1
+                    if i >= self.max_index:
+                        self.precalculate_poisson(i + 100)
+
                 temp *= self.gap_contribution
                 self.island_expectation.append(temp)
-                #print index, temp, self.island_expectation[index];
         return self.island_expectation[scaled_score]
 
     def generate_cumulative_dist(self, outfile=""):
@@ -202,11 +203,10 @@ class Background_island_probscore_statistics:
             outf = open(outfile, "w")
             outline = "# Score" + "\t" + "Expect # islands" + "\t" + "Cumulative # Islands" + "\t" + "Asymptotics" + "\n"
             outf.write(outline)
-            for index in xrange(len(self.island_expectation)):
+            for index in range(len(self.island_expectation)):
                 outline = str(index * self.bin_size) + "\t" + str(
                     self.island_expectation[index]) + "\t" + str(
-                        self.cumulative[index]) + "\n"
-                #outline = str(index * self.bin_size) + "\t" + str(self.island_expectation[index])+ "\t" +str(self.cumulative[index]) + "\t" + str(self.cumulative[fixpoint] * exp(-self.root*(self.cumulative[index]-self.cumulative[fixpoint]))) + "\n";
+                    self.cumulative[index]) + "\n"
                 outf.write(outline)
             outf.close()
 
@@ -239,74 +239,11 @@ class Background_island_probscore_statistics:
             #print  index*self.bin_size, self.island_expectation[index];
 
         self.generate_cumulative_dist()
-        for index in xrange(len(self.cumulative)):
+        for index in range(len(self.cumulative)):
             if self.cumulative[index] <= e_value_threshold:
                 score_threshold = index * self.bin_size
                 break
         return score_threshold
-
-    def func(self, x):
-        sum_ = 0.0
-        for index in range(self.min_tags_in_window, self.max_index):
-            sum_ += self.gap_contribution * pow(self.poisson_value[index],
-                                                1 - x)
-        return sum_ - 1
-
-    def bracket_root(self, f, interval, max_iterations=50):
-        """\
-		Given a univariate function f and a tuple interval=(x1,x2),
-		return a new tuple (bracket, fnvals) where bracket=(x1,x2)
-		brackets a root of f and fnvals=(f(x1),f(x2)).
-		"""
-        GOLDEN = (1 + 5**.5) / 2
-        (x1, x2) = interval
-        if x1 == x2:
-            raise Exception("initial interval has zero width")
-        elif x2 < x1:
-            x1, x2 = x2, x1
-        f1, f2 = f(x1), f(x2)
-        for j in xrange(max_iterations):
-            while f1 * f2 >= 0:  # not currently bracketed
-                if abs(f1) < abs(f2):
-                    x1 = x1 + GOLDEN * (x1 - x2)
-                else:
-                    x2 = x2 + GOLDEN * (x2 - x1)
-                f1, f2 = f(x1), f(x2)
-            return (x1, x2), (f1, f2)
-        raise Exception("too many iterations")
-
-    # based on Numerical Recipes, p. 354
-    def bisect_root(self, func, interval, xacc):
-        JMAX = 50
-        (x1, x2) = interval
-        f = func(x1)
-        fmid = func(x2)
-        if (f * fmid >= 0.0): print("Root must be bracketed for bisection")
-        if (f < 0.0):
-            dx = x2 - x1
-            rtb = x1
-        else:
-            dx = x1 - x2
-            rtb = x2
-        for j in xrange(JMAX):
-            dx *= 0.5
-            xmid = rtb + dx
-            fmid = func(xmid)
-            if (fmid <= 0.0): rtb = xmid
-            if (fabs(dx) < xacc or fmid == 0.0): return rtb
-        print("Too many bisections")
-        return 0.0
-
-    def find_asymptotics_exponent(self, xacc=.00001):
-        num = 100
-        #for index in xrange(num):
-        #	x = index/float(num);
-        #	print x, self.func(x);
-        input_bracket = (0.1, 1)
-        (xresult, yresult) = self.bracket_root(self.func, input_bracket)
-        root = self.bisect_root(self.func, xresult, xacc)
-        #print "# The exponent is: ", root;
-        return root
 
 
 # Species:  hg38
@@ -393,7 +330,6 @@ class Background_island_probscore_statistics:
 
 def compute_score_threshold(chip_counts, window_size, effective_genome_length,
                             gap_size, e_value):
-
     tag_density = chip_counts / effective_genome_length
     background = Background_island_probscore_statistics(
         chip_counts, window_size, gap_size, 0.2, effective_genome_length,
@@ -405,6 +341,6 @@ def compute_score_threshold(chip_counts, window_size, effective_genome_length,
     min_tags_in_window = background.min_tags_in_window
 
     average_window_readcount = chip_counts * (
-        window_size / float(effective_genome_length))
+            window_size / float(effective_genome_length))
 
     return score_threshold, min_tags_in_window, average_window_readcount
