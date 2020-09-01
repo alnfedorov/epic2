@@ -2,7 +2,7 @@ from sys import argv
 import sys
 import os
 
-from epic2.src.reads_to_bins import files_to_bin_counts
+from epic2.src.reads_to_bins import files_to_tags, bin_tags
 from epic2.src.find_islands import find_islands, compute_fdr, write_islands, add_chip_count_to_islands
 from epic2.src.genome_info import egl_and_chromsizes
 
@@ -36,8 +36,8 @@ def _main(args):
     args["chromsizes_"] = chromsizes
     args["effective_genome_size"] = effective_genome_length
 
-    c_bins_counts, chip_count_before = files_to_bin_counts(
-        args["treatment"], args, "ChIP")
+    tags = files_to_tags(args["treatment"], args, "ChIP")
+    c_bins_counts, chip_count_before = bin_tags(tags, args["bin_size"], args["chromsizes_"])
     chip_count = sum(sum(counts) for _, counts in c_bins_counts.values())
 
     logging.info(
@@ -65,11 +65,10 @@ def _main(args):
         sum(len(i) for i in islands.values())))
 
     if args["control"]:
+        tags = files_to_tags(args["control"], args, "Input")
+        b_bins_counts, background_count_before = bin_tags(tags, args["bin_size"], args["chromsizes_"])
+        background_count = sum(sum(counts) for _, counts in b_bins_counts.values())
 
-        b_bins_counts, background_count_before = files_to_bin_counts(
-            args["control"], args, "Input")
-        background_count = sum(
-            sum(counts) for _, counts in b_bins_counts.values())
         logging.info(
             "\nValid Background reads: {} ({} before out of bounds removal)\n".
             format(background_count, background_count_before))

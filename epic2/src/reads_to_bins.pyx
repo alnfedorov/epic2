@@ -28,7 +28,7 @@ cdef extern from "<algorithm>" namespace "std" nogil:
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cpdef count_reads_per_bin(tags):
+cpdef count_reads_per_bin(tags: dict):
 
     cdef:
         uint32_t[::1] bins
@@ -159,7 +159,7 @@ cdef _preprocess_tags(cr.genome_map cpp_tags, dict args):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cdef tags_to_bin_counts(dict tags, dict sum_tags, uint32_t half_fragment_size, uint32_t bin_size):
+cdef shift_tags(dict tags, dict all_tags, uint32_t half_fragment_size):
     cdef:
         Vector32 v, v2
         size_t i, vlen
@@ -168,7 +168,6 @@ cdef tags_to_bin_counts(dict tags, dict sum_tags, uint32_t half_fragment_size, u
         if strand == "+":
             for i in range(vlen):
                 v.wrapped_vector[i] = v.wrapped_vector[i] + half_fragment_size
-                v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
         else:
             i = 0
             while i < vlen and v.wrapped_vector[i] < half_fragment_size:
@@ -177,59 +176,36 @@ cdef tags_to_bin_counts(dict tags, dict sum_tags, uint32_t half_fragment_size, u
 
             for i in range(i, vlen):
                 v.wrapped_vector[i] = v.wrapped_vector[i] - half_fragment_size
-                v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
 
         # for i in range(len(v)):
         #     v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
 
         # sys.stderr.write("Found {} for {} {}\n".format(i, chromosome, strand))
-        if chromosome not in sum_tags:
-            sum_tags[chromosome] = v
+        if chromosome not in all_tags:
+            all_tags[chromosome] = v
         else:
-            v2 = sum_tags[chromosome]
-            sum_tags[chromosome] = v.merge(v2)
+            v2 = all_tags[chromosome]
+            all_tags[chromosome] = v.merge(v2)
 
 
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cdef paired_tags_to_bin_counts(dict tags, dict sum_tags, uint32_t bin_size):
+cpdef files_to_tags(files, args, datatype):
     cdef:
-        Vector32 v, v2
-        size_t i, vlen
-    for (chromosome, strand), v in tags.items():
-        vlen = v.wrapped_vector.size()
-        for i in range(vlen):
-            # print(v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size))
-            v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
-
-        if chromosome not in sum_tags:
-            sum_tags[chromosome] = v
-        else:
-            v2 = sum_tags[chromosome]
-            sum_tags[chromosome] = v.merge(v2)
-
-
-@cython.cdivision(True)
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.initializedcheck(False)
-cpdef files_to_bin_counts(files, args, datatype):
-
-    cdef:
-        uint32_t bin_size = args["bin_size"]
         uint32_t half_fragment_size = args["fragment_size"] / 2
         uint32_t drop_duplicates = args["drop_duplicates"]
         bytes py_bytes
         char* c_string
         cr.genome_map cpp_tags
         str file_format
+        Vector32 v
 
     logging.info("Parsing {} file(s):".format(datatype))
     sys.stderr.flush()
 
-    sum_tags = dict()
+    all_tags = dict()
     for f in files:
         logging.info("  " + f)
         sys.stderr.flush()
@@ -261,34 +237,49 @@ cpdef files_to_bin_counts(files, args, datatype):
         total_tags = sum([len(x) for x in tags.values()])
         if paired_end:
             logging.info("    " + "Total eligible paired end reads: {}".format(total_tags))
-            paired_tags_to_bin_counts(tags, sum_tags, bin_size)
+            for (chromosome, strand), v in tags.items():
+                if chromosome not in all_tags:
+                    all_tags[chromosome] = v
+                else:
+                    v2 = all_tags[chromosome]
+                    all_tags[chromosome] = v.merge(v2)
         else:
             logging.info("    " + "Total eligible single end reads: {}".format(total_tags))
-            tags_to_bin_counts(tags, sum_tags, half_fragment_size, bin_size)
+            shift_tags(tags, all_tags, half_fragment_size)
+
+    for _, v in all_tags.items():
+        v.sort()
 
     sys.stderr.flush()
+    return all_tags
 
-    bins_counts = count_reads_per_bin(sum_tags)
-    # print(bins_counts)
 
-    # import pandas as pd
-    # bins, counts = [pd.Series(s) for s in bins_counts["chrY"]]
-    # print(bins.tail(), file=sys.stderr)
-    # print(counts.tail(), file=sys.stderr)
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cpdef bin_tags(all_tags, uint32_t bin_size, chromsizes):
+    cdef:
+        Vector32 v, v2
+        size_t i, vlen
 
+    bins = dict()
+
+    for chromosome, v in all_tags.items():
+        vlen = len(v)
+        for i in range(vlen):
+            v.wrapped_vector[i] = v.wrapped_vector[i] - (v.wrapped_vector[i] % bin_size)
+
+        if chromosome not in bins:
+            bins[chromosome] = v
+        else:
+            v2 = bins[chromosome]
+            bins[chromosome] = v.merge(v2)
+
+    bins_counts = count_reads_per_bin(bins)
     count = sum([sum(counts) for _, counts in bins_counts.values()])
-    remove_out_of_bounds_bins(bins_counts, args["chromsizes_"], bin_size)
-
-    # bins, counts = [pd.Series(s) for s in bins_counts["chrY"]]
-    # print(bins.tail())
-    # print(counts.tail())
-
-    # print(bins.tail(), file=sys.stderr)
-    # print(counts.tail(), file=sys.stderr)
-
+    remove_out_of_bounds_bins(bins_counts, chromsizes, bin_size)
     return bins_counts, count
-
-
 
 # cpdef add_reads_to_dict(f, chromosomes):
 #

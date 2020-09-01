@@ -5,7 +5,7 @@ from os.path import basename, splitext, dirname, join
 import pandas as pd
 import pyranges as pr
 from epic2.src.genome_info import sniff
-from epic2.src.reads_to_bins import files_to_bin_counts
+from epic2.src.reads_to_bins import files_to_tags, bin_tags
 
 # note that
 
@@ -41,7 +41,8 @@ def file_to_binned_ranges(f, args, datatype):
 
     chromosome_data = {}
     # counts = 0
-    bin_counts, _ = files_to_bin_counts([f], args, datatype)
+    tags = files_to_tags([f], args, datatype)
+    bin_counts, _ = bin_tags(tags, args["bin_size"], args["chromsizes_"])
 
     for c, v in bin_counts.items():
         starts, scores = v
