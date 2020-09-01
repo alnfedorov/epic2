@@ -76,9 +76,7 @@ genome_map intervals_to_five_end(genome_intervals genome, uint32_t drop_duplicat
         genome_tags[chrom_strand].push_back(intervals[i].end);
       }
     }
-    genome.erase(chrom_strand);
-    it++;
-
+    it = genome.erase(it);
   }
 
   return genome_tags;
@@ -97,7 +95,6 @@ genome_map intervals_to_midpoint(genome_intervals genome, uint32_t drop_duplicat
   genome_map genome_tags;
 
   it = genome.begin();
-
   while(it != genome.end()){
 
     chrom_strand = it->first;
@@ -111,11 +108,10 @@ genome_map intervals_to_midpoint(genome_intervals genome, uint32_t drop_duplicat
     i = 0;
     for (i = 0; i < intervals.size(); i++){
       midpoint = static_cast<uint32_t> (intervals[i].start + (intervals[i].end - intervals[i].start)/2);
+      // std::cout << "Midpoint " << midpoint << "\n";
       genome_tags[chrom_strand].push_back(midpoint);
     }
-    genome.erase(chrom_strand);
-    it++;
-
+    it = genome.erase(it);
   }
 
   return genome_tags;
@@ -184,6 +180,7 @@ genome_map read_bedpe(char const* fileName, uint32_t drop_duplicates)
       if (end < end2){
         end = end2;
       }
+      // std::cout << "Start " << start << " End " << end << "\n";
 
       chrom_strand = std::make_pair(chromosome, strand);
 
